@@ -1,0 +1,157 @@
+#!/bin/bash
+
+# 定义颜色
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 检查参数数量
+if [ $# -ne 4 ] && [ $# -ne 3 ]; then
+  echo -e "${RED}Error: Incorrect number of arguments.${NC}"
+  echo -e "${YELLOW}Usage: patlibc <new_libc_path> <new_ld_path> <lib_name> <binary>${NC}"
+  echo -e "${YELLOW}       patlibc <libc_version> <binary> <path>${NC}"
+  exit 1
+fi
+
+# 处理四个参数的情况
+if [ $# -eq 4 ]; then
+  # 参数
+  NEW_LIBC_PATH=$1
+  NEW_LD_PATH=$2
+  LIB=$3
+  BINARY=$4
+
+  # 检查文件是否存在
+  if [ ! -f "$BINARY" ]; then
+    echo -e "${RED}Error: Binary file $BINARY not found!${NC}"
+    exit 1
+  fi
+
+  if [ ! -f "$NEW_LIBC_PATH" ]; then
+    echo -e "${RED}Error: New libc file $NEW_LIBC_PATH not found!${NC}"
+    exit 1
+  fi
+
+  if [ ! -f "$NEW_LD_PATH" ]; then
+    echo -e "${RED}Error: New dynamic linker $NEW_LD_PATH not found!${NC}"
+    exit 1
+  fi
+
+  # 使用 patchelf 替换 libc.so.6
+  patchelf --replace-needed "$LIB" "$NEW_LIBC_PATH" "$BINARY" 2>/dev/null
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to replace needed library.${NC}"
+    exit 1
+  fi
+
+  # 使用 patchelf 设置新的动态链接器
+  patchelf --set-interpreter "$NEW_LD_PATH" "$BINARY" 2>/dev/null
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to set new interpreter.${NC}"
+    exit 1
+  fi
+
+  echo -e "${RED}Patched $BINARY with libc: $NEW_LIBC_PATH and ld: $NEW_LD_PATH${NC}"
+
+  # 显示链接的库
+  echo -e "${BLUE}Linked libraries for ${YELLOW}$BINARY${BLUE}:${NC}"
+  echo -e "${RED}Success!!!${NC}"
+
+  ldd "$BINARY" | while read -r line; do
+    if [[ $line == *"=>"* ]]; then
+      echo -e "${YELLOW}$line${NC}"
+    else
+      echo -e "${YELLOW}$line${NC}"
+    fi
+  done
+
+
+# 处理三个参数的情况
+elif [ $# -eq 3 ]; then
+  # 参数
+  LIBC_VERSION=$1
+  BINARY=$2
+  BASE_DIR=$3
+
+  # 检查目录是否存在
+  if [ ! -d "$BASE_DIR" ]; then
+    echo -e "${RED}Error: Directory $BASE_DIR not found!${NC}"
+    exit 1
+  fi
+
+  # 查找 glibc-all-in-one/libs 目录
+  GLIBC_DIR="$BASE_DIR/glibc-all-in-one/libs"
+  if [ ! -d "$GLIBC_DIR" ]; then
+    echo -e "${RED}Error: Directory $GLIBC_DIR not found!${NC}"
+    exit 1
+  fi
+
+  # 列出所有匹配的目录
+  echo -e "${BLUE}Available directories for version $LIBC_VERSION in $GLIBC_DIR:${NC}"
+  VERSION_DIRS=($(ls -d "$GLIBC_DIR"/*"$LIBC_VERSION"* | grep -v '.debug'))
+
+  if [ ${#VERSION_DIRS[@]} -eq 0 ]; then
+    echo -e "${RED}Error: No matching directories found for version $LIBC_VERSION!${NC}"
+    exit 1
+  fi
+
+  # 显示匹配的目录供用户选择
+  for i in "${!VERSION_DIRS[@]}"; do
+    echo -e "${YELLOW}[$i] ${VERSION_DIRS[$i]}${NC}"
+  done
+
+  read -p "Select the directory by number: " DIR_CHOICE
+
+  if ! [[ $DIR_CHOICE =~ ^[0-9]+$ ]] || [ $DIR_CHOICE -ge ${#VERSION_DIRS[@]} ]; then
+    echo -e "${RED}Error: Invalid choice.${NC}"
+    exit 1
+  fi
+
+  SELECTED_DIR="${VERSION_DIRS[$DIR_CHOICE]}"
+
+  # 查找 libc 和 ld 文件，排除 .debug 目录
+  LIBC_PATH=$(find "$SELECTED_DIR" -maxdepth 1 -type f -name "libc-*.so" -not -path "$SELECTED_DIR/.debug/*" | head -n 1)
+  LD_PATH=$(find "$SELECTED_DIR" -maxdepth 1 -type f -name "ld-*.so" -not -path "$SELECTED_DIR/.debug/*" | head -n 1)
+
+  if [ -z "$LIBC_PATH" ] || [ -z "$LD_PATH" ]; then
+    echo -e "${RED}Error: Could not find libc or ld files in directory $SELECTED_DIR!${NC}"
+    exit 1
+  fi
+
+  # 检查文件是否存在
+  if [ ! -f "$BINARY" ]; then
+    echo -e "${RED}Error: Binary file $BINARY not found!${NC}"
+    exit 1
+  fi
+
+  # 使用 patchelf 替换 libc.so.6
+  patchelf --replace-needed "libc.so.6" "$LIBC_PATH" "$BINARY" 2>/dev/null
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to replace needed library.${NC}"
+    exit 1
+  fi
+
+  # 使用 patchelf 设置新的动态链接器
+  patchelf --set-interpreter "$LD_PATH" "$BINARY" 2>/dev/null
+  if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to set new interpreter.${NC}"
+    exit 1
+  fi
+
+  echo -e "${RED}Patched $BINARY with libc: $LIBC_PATH and ld: $LD_PATH${NC}"
+
+
+  # 显示链接的库
+  echo -e "${BLUE}Linked libraries for ${YELLOW}$BINARY${BLUE}:${NC}"
+  ldd "$BINARY" | while read -r line; do
+    if [[ $line == *"=>"* ]]; then
+      echo -e "${YELLOW}$line${NC}"
+    else
+      echo -e "${YELLOW}$line${NC}"
+    fi
+  done
+  echo -e "${RED}Success!!!${NC}"
+
+fi
