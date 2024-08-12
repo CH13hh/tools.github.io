@@ -27,3 +27,7 @@ Usage: patlibc <libc_version> <binary> <path>
 eg: patlibc 2.23 pwn ./
 ```
 
+
+
+PS：依赖patchelf，如果没有请先下载patchelf，3参数模式依赖glibc-all-in-one
+
